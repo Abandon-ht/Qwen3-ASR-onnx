@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -176,7 +177,7 @@ def get_args():
     p.add_argument("--encoder", type=str, required=True, help="encoder.onnx or encoder.int8.onnx")
     p.add_argument("--decoder", type=str, required=True, help="decoder.onnx or decoder.int8.onnx")
     p.add_argument("--wav", type=str, required=True, help=".wav or .npy (16k mono preferred)")
-    p.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
+    p.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
     p.add_argument("--max-total-len", type=int, default=512)
     p.add_argument("--max-new-tokens", type=int, default=64)
     p.add_argument("--debug", action="store_true")
@@ -199,6 +200,7 @@ def main():
     conv_sess = _make_sess(args.conv_frontend, device=args.device)
 
     wav = _load_audio_any(args.wav)
+    audio_duration = len(wav) / 16000
 
     audio_inputs = proc.feature_extractor(
         [wav],
@@ -306,6 +308,8 @@ def main():
     eos_id = tok.eos_token_id
     out_ids: List[int] = []
 
+    infer_start_time = time.time()
+
     next_id = int(np.argmax(logits[0, -1], axis=-1))
     out_ids.append(next_id)
 
@@ -321,6 +325,10 @@ def main():
     text = tok.decode(out_ids, skip_special_tokens=True)
     text = text.replace("\ufffd", "")
     print(text)
+
+    processing_time = time.time() - infer_start_time
+    rtf = processing_time / audio_duration
+    print(f"RTF: {rtf:.4f}")
 
 
 if __name__ == "__main__":
