@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from transformers import AutoProcessor, AutoTokenizer
 
 
-def _feat_to_audio_tokens_len_np(feat_len: np.ndarray, chunk_size: int = 100) -> np.ndarray:
+def _feat_to_audio_tokens_len_np(
+    feat_len: np.ndarray, chunk_size: int = 100
+) -> np.ndarray:
     def _conv_out_len_3x_stride2(n: int) -> int:
         x = (int(n) + 1) // 2
         x = (x + 1) // 2
@@ -43,6 +45,7 @@ def _register_qwen3_asr() -> bool:
     try:
         from qwen3_asr import Qwen3ASRConfig, Qwen3ASRProcessor
         from transformers import AutoConfig, AutoProcessor
+
         AutoConfig.register("qwen3_asr", Qwen3ASRConfig)
         AutoProcessor.register(Qwen3ASRConfig, Qwen3ASRProcessor)
         return True
@@ -62,20 +65,29 @@ def _make_sess(path: str, device: str = "cpu") -> ort.InferenceSession:
     return ort.InferenceSession(path, sess_options=so, providers=providers)
 
 
-def _make_sess_with_fallback(path: str, device: str, fp32_fallback: Optional[str] = None) -> ort.InferenceSession:
+def _make_sess_with_fallback(
+    path: str, device: str, fp32_fallback: Optional[str] = None
+) -> ort.InferenceSession:
     try:
         return _make_sess(path, device=device)
     except Exception as e:
         msg = str(e)
         if fp32_fallback and ("ConvInteger" in msg or "NOT_IMPLEMENTED" in msg):
-            print(f"[warn] load failed for {path}: {msg}\n       fallback -> {fp32_fallback}")
+            print(
+                f"[warn] load failed for {path}: {msg}\n       fallback -> {fp32_fallback}"
+            )
             return _make_sess(fp32_fallback, device=device)
         raise
 
 
-def _infer_cache_meta(dec_sess: ort.InferenceSession) -> Tuple[int, Optional[int], Optional[int], Optional[int]]:
+def _infer_cache_meta(
+    dec_sess: ort.InferenceSession,
+) -> Tuple[int, Optional[int], Optional[int], Optional[int]]:
     inps = {i.name: i for i in dec_sess.get_inputs()}
-    keys = sorted([n for n in inps if n.startswith("cache_key_")], key=lambda x: int(x.split("_")[-1]))
+    keys = sorted(
+        [n for n in inps if n.startswith("cache_key_")],
+        key=lambda x: int(x.split("_")[-1]),
+    )
     if not keys:
         raise RuntimeError("decoder inputs missing cache_key_*")
 
@@ -98,9 +110,9 @@ def _load_audio_any(path: str) -> np.ndarray:
         data = data.mean(axis=1)
 
     if data.dtype == np.int16:
-        wav = (data.astype(np.float32) / 32768.0)
+        wav = data.astype(np.float32) / 32768.0
     elif data.dtype == np.int32:
-        wav = (data.astype(np.float32) / 2147483648.0)
+        wav = data.astype(np.float32) / 2147483648.0
     else:
         wav = data.astype(np.float32)
 
@@ -132,7 +144,11 @@ def _check_model_dir(model_dir: str) -> None:
 
 def _load_tokenizer(model_dir: str):
     for kwargs in (
-        dict(trust_remote_code=True, use_slow_tokenizer=True, fix_mistral_regex=True),
+        dict(
+            trust_remote_code=True,
+            use_slow_tokenizer=True,
+            fix_mistral_regex=True,
+        ),
         dict(trust_remote_code=True, fix_mistral_regex=True),
         dict(trust_remote_code=True, use_slow_tokenizer=True),
         dict(trust_remote_code=True),
@@ -156,7 +172,9 @@ def _load_processor(model_dir: str):
     return AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
 
 
-def _trim_audio_features(audio_features: np.ndarray, eps: float = 1e-6) -> np.ndarray:
+def _trim_audio_features(
+    audio_features: np.ndarray, eps: float = 1e-6
+) -> np.ndarray:
     if audio_features.ndim != 3:
         return audio_features
     B, A, H = audio_features.shape
@@ -171,12 +189,36 @@ def _trim_audio_features(audio_features: np.ndarray, eps: float = 1e-6) -> np.nd
 
 
 def get_args():
-    p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--model", type=str, required=True, help="Qwen3-ASR checkpoint path")
-    p.add_argument("--conv_frontend", type=str, required=True, help="conv_frontend.onnx path")
-    p.add_argument("--encoder", type=str, required=True, help="encoder.onnx or encoder.int8.onnx")
-    p.add_argument("--decoder", type=str, required=True, help="decoder.onnx or decoder.int8.onnx")
-    p.add_argument("--wav", type=str, required=True, help=".wav or .npy (16k mono preferred)")
+    p = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    p.add_argument(
+        "--model", type=str, required=True, help="Qwen3-ASR checkpoint path"
+    )
+    p.add_argument(
+        "--conv_frontend",
+        type=str,
+        required=True,
+        help="conv_frontend.onnx path",
+    )
+    p.add_argument(
+        "--encoder",
+        type=str,
+        required=True,
+        help="encoder.onnx or encoder.int8.onnx",
+    )
+    p.add_argument(
+        "--decoder",
+        type=str,
+        required=True,
+        help="decoder.onnx or decoder.int8.onnx",
+    )
+    p.add_argument(
+        "--wav",
+        type=str,
+        required=True,
+        help=".wav or .npy (16k mono preferred)",
+    )
     p.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
     p.add_argument("--max-total-len", type=int, default=512)
     p.add_argument("--max-new-tokens", type=int, default=64)
@@ -193,9 +235,17 @@ def main():
     tok = _load_tokenizer(args.model)
     proc = _load_processor(args.model)
 
-    enc = _make_sess(args.encoder.replace(".int8.onnx", ".onnx"), device=args.device)
-    dec_fp32_guess = args.decoder.replace(".int8.onnx", ".onnx") if args.decoder.endswith(".int8.onnx") else None
-    dec = _make_sess_with_fallback(args.decoder, device=args.device, fp32_fallback=dec_fp32_guess)
+    enc = _make_sess(
+        args.encoder.replace(".int8.onnx", ".onnx"), device=args.device
+    )
+    dec_fp32_guess = (
+        args.decoder.replace(".int8.onnx", ".onnx")
+        if args.decoder.endswith(".int8.onnx")
+        else None
+    )
+    dec = _make_sess_with_fallback(
+        args.decoder, device=args.device, fp32_fallback=dec_fp32_guess
+    )
 
     conv_sess = _make_sess(args.conv_frontend, device=args.device)
 
@@ -209,13 +259,27 @@ def main():
         return_attention_mask=True,
         return_tensors="np",
     )
-    input_features = np.asarray(audio_inputs["input_features"], dtype=np.float32)
+    input_features = np.asarray(
+        audio_inputs["input_features"], dtype=np.float32
+    )
     feat_mask = np.asarray(audio_inputs["attention_mask"], dtype=np.int32)
 
     if args.debug:
-        print("wav range:", float(wav.min()), float(wav.max()), "len:", wav.shape[0])
+        print(
+            "wav range:",
+            float(wav.min()),
+            float(wav.max()),
+            "len:",
+            wav.shape[0],
+        )
         print("input_features:", input_features.shape, input_features.dtype)
-        print("feature_attention_mask:", feat_mask.shape, feat_mask.dtype, "sum:", int(feat_mask.sum()))
+        print(
+            "feature_attention_mask:",
+            feat_mask.shape,
+            feat_mask.dtype,
+            "sum:",
+            int(feat_mask.sum()),
+        )
 
     # Run conv_frontend ONNX
     mel_input = input_features.transpose(0, 2, 1)  # (B,F,T) -> (B,T,F)
@@ -232,7 +296,13 @@ def main():
 
     if args.debug:
         print("conv_output:", conv_output_np.shape, conv_output_np.dtype)
-        print("tok_mask:", tok_mask.shape, tok_mask.dtype, "sum:", int(tok_mask.sum()))
+        print(
+            "tok_mask:",
+            tok_mask.shape,
+            tok_mask.dtype,
+            "sum:",
+            int(tok_mask.sum()),
+        )
 
     enc_inputs = {
         "input_features": conv_output_np,
@@ -251,7 +321,9 @@ def main():
     assistant_text = "<|im_start|>assistant\n"
 
     full_prompt = system_text + user_text + assistant_text
-    input_ids = np.asarray([tok.encode(full_prompt, add_special_tokens=False)], dtype=np.int64)
+    input_ids = np.asarray(
+        [tok.encode(full_prompt, add_special_tokens=False)], dtype=np.int64
+    )
     S0 = int(input_ids.shape[1])
 
     L, _, kv, hd = _infer_cache_meta(dec)
@@ -260,7 +332,9 @@ def main():
 
     max_total_len = int(args.max_total_len)
     if S0 >= max_total_len:
-        raise RuntimeError(f"prompt too long: S0={S0} >= max_total_len={max_total_len}")
+        raise RuntimeError(
+            f"prompt too long: S0={S0} >= max_total_len={max_total_len}"
+        )
 
     caches: List[np.ndarray] = []
     for _ in range(L):
@@ -274,7 +348,9 @@ def main():
     def _run_decoder(step_input_ids: np.ndarray, cur_len: int) -> np.ndarray:
         S = int(step_input_ids.shape[1])
         if cur_len + S > max_total_len:
-            raise RuntimeError(f"cur_len overflow: {cur_len}+{S} > {max_total_len}")
+            raise RuntimeError(
+                f"cur_len overflow: {cur_len}+{S} > {max_total_len}"
+            )
 
         attn_mask = np.ones((B, S), dtype=np.int64)
         cache_pos = np.arange(cur_len, cur_len + S, dtype=np.int64)
@@ -296,8 +372,8 @@ def main():
         for i in range(L):
             kd = np.asarray(out_map[f"key_delta_{i}"], dtype=np.float32)
             vd = np.asarray(out_map[f"value_delta_{i}"], dtype=np.float32)
-            caches[2 * i][:, cur_len:cur_len + S] = kd
-            caches[2 * i + 1][:, cur_len:cur_len + S] = vd
+            caches[2 * i][:, cur_len : cur_len + S] = kd
+            caches[2 * i + 1][:, cur_len : cur_len + S] = vd
 
         return logits
 
