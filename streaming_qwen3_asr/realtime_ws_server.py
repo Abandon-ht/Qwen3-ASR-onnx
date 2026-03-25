@@ -113,7 +113,12 @@ class SileroVADCore:
         if self.in_sr is not None:
             feed[self.in_sr] = np.array([self.cfg.sample_rate], dtype=np.int64)
 
-        if self.in_h is not None and self.in_c is not None and h is not None and c is not None:
+        if (
+            self.in_h is not None
+            and self.in_c is not None
+            and h is not None
+            and c is not None
+        ):
             feed[self.in_h] = h
             feed[self.in_c] = c
 
@@ -153,14 +158,20 @@ class VADStream:
         self._h, self._c = self.core.init_state()
         self._speech_start_sample = 0
 
-    def feed(self, chunk_f32: np.ndarray) -> List[Tuple[dict, np.ndarray, bool, int, int]]:
+    def feed(
+        self, chunk_f32: np.ndarray
+    ) -> List[Tuple[dict, np.ndarray, bool, int, int]]:
         cfg = self.cfg
         chunk_f32 = np.asarray(chunk_f32, dtype=np.float32).reshape(-1)
         self._buf = np.concatenate([self._buf, chunk_f32], axis=0)
 
         prepad_keep = int(cfg.sample_rate * cfg.prepad_ms / 1000)
-        min_speech_frames = max(1, int(cfg.min_speech_duration * cfg.sample_rate / cfg.hop_size))
-        min_silence_frames = max(1, int(cfg.min_silence_duration * cfg.sample_rate / cfg.hop_size))
+        min_speech_frames = max(
+            1, int(cfg.min_speech_duration * cfg.sample_rate / cfg.hop_size)
+        )
+        min_silence_frames = max(
+            1, int(cfg.min_silence_duration * cfg.sample_rate / cfg.hop_size)
+        )
 
         events: List[Tuple[dict, np.ndarray, bool, int, int]] = []
         produced = np.zeros((0,), dtype=np.float32)
@@ -187,7 +198,11 @@ class VADStream:
                 if not self.in_speech:
                     self._speech_run = 0
 
-            if (not self.in_speech) and is_speech and self._speech_run >= min_speech_frames:
+            if (
+                (not self.in_speech)
+                and is_speech
+                and self._speech_run >= min_speech_frames
+            ):
                 self.in_speech = True
                 self._speech_start_sample = self.sample_index
 
@@ -198,7 +213,11 @@ class VADStream:
                 s1 = self.sample_index + cfg.hop_size
                 events.append(({"start": s0}, start_audio, False, s0, s1))
 
-            if self.in_speech and (not is_speech) and self._silence_run >= min_silence_frames:
+            if (
+                self.in_speech
+                and (not is_speech)
+                and self._silence_run >= min_silence_frames
+            ):
                 self.in_speech = False
 
                 end_audio = np.concatenate([produced, cur_hop], axis=0)
@@ -225,7 +244,11 @@ class VADStream:
         if not self.in_speech:
             return None
 
-        tail = self._buf.copy() if self._buf.size > 0 else np.zeros((0,), dtype=np.float32)
+        tail = (
+            self._buf.copy()
+            if self._buf.size > 0
+            else np.zeros((0,), dtype=np.float32)
+        )
         s1 = self.sample_index + tail.shape[0]
 
         self.in_speech = False
@@ -263,11 +286,24 @@ chunk_size_sec = 2.0
 
 def get_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", type=str, required=True, help="Qwen3-ASR checkpoint path")
-    p.add_argument("--conv_frontend", type=str, required=True, help="conv_frontend.onnx path")
-    p.add_argument("--encoder", type=str, required=True, help="encoder.onnx path")
-    p.add_argument("--decoder", type=str, required=True, help="decoder.onnx path")
-    p.add_argument("--vad_model", type=str, default="", help="silero_vad.onnx path")
+    p.add_argument(
+        "--model", type=str, required=True, help="Qwen3-ASR checkpoint path"
+    )
+    p.add_argument(
+        "--conv_frontend",
+        type=str,
+        required=True,
+        help="conv_frontend.onnx path",
+    )
+    p.add_argument(
+        "--encoder", type=str, required=True, help="encoder.onnx path"
+    )
+    p.add_argument(
+        "--decoder", type=str, required=True, help="decoder.onnx path"
+    )
+    p.add_argument(
+        "--vad_model", type=str, default="", help="silero_vad.onnx path"
+    )
     p.add_argument("--host", type=str, default="0.0.0.0")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--device", choices=["cpu", "cuda"], default="cpu")
@@ -277,7 +313,9 @@ def get_args():
 
 @app.get("/")
 async def index():
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    html_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "index.html"
+    )
     return FileResponse(html_path, media_type="text/html")
 
 
@@ -319,20 +357,26 @@ async def websocket_endpoint(websocket: WebSocket):
         for speech_dict, speech_f32, is_last, s0, s1 in events:
             if "start" in speech_dict:
                 sentence_count += 1
-                state = asr_model.init_streaming_state(chunk_size_sec=chunk_size_sec)
+                state = asr_model.init_streaming_state(
+                    chunk_size_sec=chunk_size_sec
+                )
                 sessions[session_id] = state
                 in_speech = True
                 last_sent_text = ""
 
-                await websocket.send_json({
-                    "type": "NewSegment",
-                    "segment_id": sentence_count,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "NewSegment",
+                        "segment_id": sentence_count,
+                    }
+                )
                 await websocket.send_json(VADEvent(is_active=True).model_dump())
 
             if in_speech or speech_f32.size > 0:
                 if speech_f32.size > 0:
-                    speech_i16 = np.clip(speech_f32 * 32768.0, -32768, 32767).astype(np.int16)
+                    speech_i16 = np.clip(
+                        speech_f32 * 32768.0, -32768, 32767
+                    ).astype(np.int16)
                     state = asr_model.streaming_transcribe(speech_i16, state)
 
                     if state.text and state.text != last_sent_text:
@@ -357,17 +401,23 @@ async def websocket_endpoint(websocket: WebSocket):
                             ).model_dump()
                         )
 
-                    state = asr_model.init_streaming_state(chunk_size_sec=chunk_size_sec)
+                    state = asr_model.init_streaming_state(
+                        chunk_size_sec=chunk_size_sec
+                    )
                     sessions[session_id] = state
                     in_speech = False
                     last_sent_text = ""
-                    await websocket.send_json(VADEvent(is_active=False).model_dump())
+                    await websocket.send_json(
+                        VADEvent(is_active=False).model_dump()
+                    )
 
     try:
-        await websocket.send_json({
-            "type": "InitResponse",
-            "session_id": session_id,
-        })
+        await websocket.send_json(
+            {
+                "type": "InitResponse",
+                "session_id": session_id,
+            }
+        )
 
         while True:
             msg = await websocket.receive()
@@ -398,7 +448,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 TranscriptionResponse(
                                     text=state.text,
                                     is_final=True,
-                                    segment_id=sentence_count if sentence_count > 0 else 1,
+                                    segment_id=sentence_count
+                                    if sentence_count > 0
+                                    else 1,
                                 ).model_dump()
                             )
                     break
@@ -420,10 +472,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not segment_open:
                     sentence_count = 1
                     segment_open = True
-                    await websocket.send_json({
-                        "type": "NewSegment",
-                        "segment_id": sentence_count,
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "NewSegment",
+                            "segment_id": sentence_count,
+                        }
+                    )
 
                 state = asr_model.streaming_transcribe(samples_i16, state)
                 if state.text and state.text != last_sent_text:
@@ -473,13 +527,16 @@ def main():
         vad_model = SileroVADCore(vad_cfg)
     else:
         if vad_model_path:
-            print(f"[warn] VAD model not found, fallback to no-VAD mode: {vad_model_path}")
+            print(
+                f"[warn] VAD model not found, fallback to no-VAD mode: {vad_model_path}"
+            )
         vad_model_path = ""
         vad_model = None
 
     chunk_size_sec = args.chunk_size_sec
 
     import uvicorn
+
     uvicorn.run(app, host=args.host, port=args.port)
 
 
