@@ -187,9 +187,8 @@ class DecoderCoreWrapper(nn.Module):
         input_ids: torch.Tensor,
         audio_features: torch.Tensor,
     ) -> torch.Tensor:
-        # ONNX-friendly masked_scatter sequential: use cumsum rank + gather
         B, S, H = tok.shape
-        mask = input_ids == self.audio_token_id  # (B,S)
+        mask = input_ids == self.audio_token_id
         m64 = mask.to(torch.int64)
         rank = torch.cumsum(m64, dim=1) - 1
 
@@ -221,8 +220,13 @@ class DecoderCoreWrapper(nn.Module):
         B = x_shape[0]
         S = x_shape[1]
 
+        cache_shape = onnx_ops.shape_as_tensor(cache_k_full)
+        cache_capacity = cache_shape[1].to(cache_position.dtype)
+
         past_len = cache_position[0]
-        past_len_cache = torch.clamp(past_len, min=1)
+        past_len_clamped = torch.minimum(past_len, cache_capacity)
+        past_len_cache = torch.clamp(past_len_clamped, min=1)
+
         cache_k = cache_k_full[:, :past_len_cache]
         cache_v = cache_v_full[:, :past_len_cache]
 
@@ -283,7 +287,7 @@ class DecoderCoreWrapper(nn.Module):
             torch.matmul(q.float(), k_h.float().transpose(-1, -2)) * scale
         )
 
-        cache_valid = (past_len > 0).to(dtype=scores_cache.dtype)
+        cache_valid = (past_len_clamped > 0).to(dtype=scores_cache.dtype)
         scores_cache = scores_cache + (1.0 - cache_valid) * (-1e4)
 
         q_pos = cache_position.unsqueeze(1)

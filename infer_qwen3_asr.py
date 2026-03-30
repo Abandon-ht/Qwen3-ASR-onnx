@@ -128,7 +128,7 @@ def _check_model_dir(model_dir: str) -> None:
     if not os.path.isfile(config_path):
         raise ValueError(
             f"Model dir has no config.json: {os.path.abspath(model_dir)}\n"
-            "Set --model to the Qwen3-ASR checkpoint path (e.g. /path/to/Qwen3-ASR-0.6B)."
+            "Set --model to the Qwen3-ASR checkpoint path."
         )
     try:
         with open(config_path, "r", encoding="utf-8") as f:
@@ -172,20 +172,34 @@ def _load_processor(model_dir: str):
     return AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
 
 
-def _trim_audio_features(
-    audio_features: np.ndarray, eps: float = 1e-6
-) -> np.ndarray:
-    if audio_features.ndim != 3:
-        return audio_features
-    B, A, H = audio_features.shape
-    if B != 1:
-        return audio_features
-    energy = np.max(np.abs(audio_features[0]), axis=-1)
-    idx = np.where(energy > eps)[0]
-    if idx.size == 0:
-        return audio_features
-    A_valid = int(idx[-1] + 1)
-    return audio_features[:, :A_valid, :]
+def _resolve_audio_token_and_id(tok, proc) -> Tuple[str, int]:
+    candidates: List[str] = []
+    for holder in (getattr(proc, "tokenizer", None), tok):
+        if holder is None:
+            continue
+        v = getattr(holder, "audio_token", None)
+        if isinstance(v, str) and v:
+            candidates.append(v)
+    candidates.append("<|audio_pad|>")
+
+    seen = set()
+    unk_id = getattr(tok, "unk_token_id", None)
+
+    for token in candidates:
+        if token in seen:
+            continue
+        seen.add(token)
+
+        tid = tok.convert_tokens_to_ids(token)
+        if isinstance(tid, (int, np.integer)) and int(tid) >= 0:
+            if unk_id is None or int(tid) != int(unk_id) or token == tok.unk_token:
+                return token, int(tid)
+
+        ids = tok.encode(token, add_special_tokens=False)
+        if len(ids) == 1:
+            return token, int(ids[0])
+
+    raise RuntimeError("Cannot resolve audio token id")
 
 
 def get_args():
@@ -220,8 +234,9 @@ def get_args():
         help=".wav or .npy (16k mono preferred)",
     )
     p.add_argument("--device", choices=["cpu", "cuda"], default="cuda")
-    p.add_argument("--max-total-len", type=int, default=512)
+    p.add_argument("--max-total-len", type=int, default=1024)
     p.add_argument("--max-new-tokens", type=int, default=64)
+    p.add_argument("--chunk-size", type=int, default=100)
     p.add_argument("--debug", action="store_true")
     return p.parse_args()
 
@@ -234,10 +249,17 @@ def main():
 
     tok = _load_tokenizer(args.model)
     proc = _load_processor(args.model)
+    audio_token, audio_token_id = _resolve_audio_token_and_id(tok, proc)
 
-    enc = _make_sess(
-        args.encoder.replace(".int8.onnx", ".onnx"), device=args.device
+    enc_fp32_guess = (
+        args.encoder.replace(".int8.onnx", ".onnx")
+        if args.encoder.endswith(".int8.onnx")
+        else None
     )
+    enc = _make_sess_with_fallback(
+        args.encoder, device=args.device, fp32_fallback=enc_fp32_guess
+    )
+
     dec_fp32_guess = (
         args.decoder.replace(".int8.onnx", ".onnx")
         if args.decoder.endswith(".int8.onnx")
@@ -250,12 +272,15 @@ def main():
     conv_sess = _make_sess(args.conv_frontend, device=args.device)
 
     wav = _load_audio_any(args.wav)
-    audio_duration = len(wav) / 16000
+    audio_duration = max(len(wav) / 16000.0, 1e-6)
 
+    wav_samples = int(wav.shape[0])
     audio_inputs = proc.feature_extractor(
         [wav],
         sampling_rate=16000,
-        padding=True,
+        padding="max_length",
+        max_length=wav_samples,
+        truncation=True,
         return_attention_mask=True,
         return_tensors="np",
     )
@@ -281,17 +306,17 @@ def main():
             int(feat_mask.sum()),
         )
 
-    # Run conv_frontend ONNX
-    mel_input = input_features.transpose(0, 2, 1)  # (B,F,T) -> (B,T,F)
+    mel_input = input_features.transpose(0, 2, 1)
     conv_inputs = {"input_features": mel_input}
-    conv_outputs = conv_sess.run(["conv_output"], conv_inputs)
-    conv_output_np = conv_outputs[0]
+    (conv_output_np,) = conv_sess.run(["conv_output"], conv_inputs)
 
     valid = feat_mask != 0
     feat_len_np = valid.sum(axis=1).astype(np.int64)
-    a_len = _feat_to_audio_tokens_len_np(feat_len_np, chunk_size=100)
-    A = int(conv_output_np.shape[1])
-    pos = np.arange(A, dtype=np.int64).reshape(1, A)
+    a_len = _feat_to_audio_tokens_len_np(
+        feat_len_np, chunk_size=args.chunk_size
+    )
+    A_conv = int(conv_output_np.shape[1])
+    pos = np.arange(A_conv, dtype=np.int64).reshape(1, A_conv)
     tok_mask = pos < a_len.reshape(-1, 1)
 
     if args.debug:
@@ -310,36 +335,77 @@ def main():
     }
     (audio_features,) = enc.run(["audio_features"], enc_inputs)
     audio_features = np.asarray(audio_features, dtype=np.float32)
-    audio_features = _trim_audio_features(audio_features)
 
+    if audio_features.ndim != 3 or audio_features.shape[0] != 1:
+        raise RuntimeError(
+            f"unexpected audio_features shape: {audio_features.shape}"
+        )
+
+    A = int(a_len[0])
+    if A <= 0:
+        raise RuntimeError(f"invalid audio token length: {A}")
+
+    if A > int(audio_features.shape[1]):
+        raise RuntimeError(
+            f"audio token length overflow: A={A}, encoder_out={audio_features.shape[1]}"
+        )
+
+    audio_features = audio_features[:, :A, :]
     B, A, H = audio_features.shape
+
     if args.debug:
         print("audio_features:", audio_features.shape, audio_features.dtype)
 
     system_text = "<|im_start|>system\n<|im_end|>\n"
-    user_text = f"<|im_start|>user\n<|audio_start|>{'<|audio_pad|>' * A}<|audio_end|><|im_end|>\n"
+    user_text = (
+        f"<|im_start|>user\n<|audio_start|>{audio_token * A}<|audio_end|><|im_end|>\n"
+    )
     assistant_text = "<|im_start|>assistant\n"
-
     full_prompt = system_text + user_text + assistant_text
+
     input_ids = np.asarray(
         [tok.encode(full_prompt, add_special_tokens=False)], dtype=np.int64
     )
     S0 = int(input_ids.shape[1])
 
-    L, _, kv, hd = _infer_cache_meta(dec)
+    num_audio_slots = int((input_ids == audio_token_id).sum())
+    if num_audio_slots != A:
+        raise RuntimeError(
+            f"audio slot mismatch: prompt has {num_audio_slots} audio tokens, encoder produced {A}"
+        )
+
+    L, model_max_total_len, kv, hd = _infer_cache_meta(dec)
     if kv is None or hd is None:
         raise RuntimeError("decoder cache shape has dynamic kv/hd")
 
-    max_total_len = int(args.max_total_len)
-    if S0 >= max_total_len:
+    runtime_max_total_len = (
+        int(model_max_total_len)
+        if model_max_total_len is not None
+        else int(args.max_total_len)
+    )
+
+    required_total_len = S0 + int(args.max_new_tokens)
+    if required_total_len > runtime_max_total_len:
         raise RuntimeError(
-            f"prompt too long: S0={S0} >= max_total_len={max_total_len}"
+            f"max_total_len not enough: S0({S0}) + max_new_tokens({args.max_new_tokens}) = "
+            f"{required_total_len}, but max_total_len={runtime_max_total_len}"
         )
+
+    if args.debug:
+        print("S0:", S0)
+        print("A:", A)
+        print("required_total_len:", required_total_len)
+        print("runtime_max_total_len:", runtime_max_total_len)
+        print("num_layers:", L, "kv:", kv, "hd:", hd)
 
     caches: List[np.ndarray] = []
     for _ in range(L):
-        caches.append(np.zeros((B, max_total_len, kv, hd), dtype=np.float32))
-        caches.append(np.zeros((B, max_total_len, kv, hd), dtype=np.float32))
+        caches.append(
+            np.zeros((B, runtime_max_total_len, kv, hd), dtype=np.float32)
+        )
+        caches.append(
+            np.zeros((B, runtime_max_total_len, kv, hd), dtype=np.float32)
+        )
 
     dec_out_names = [o.name for o in dec.get_outputs()]
     if "logits" not in dec_out_names:
@@ -347,9 +413,9 @@ def main():
 
     def _run_decoder(step_input_ids: np.ndarray, cur_len: int) -> np.ndarray:
         S = int(step_input_ids.shape[1])
-        if cur_len + S > max_total_len:
+        if cur_len + S > runtime_max_total_len:
             raise RuntimeError(
-                f"cur_len overflow: {cur_len}+{S} > {max_total_len}"
+                f"cur_len overflow: {cur_len}+{S} > {runtime_max_total_len}"
             )
 
         attn_mask = np.ones((B, S), dtype=np.int64)
