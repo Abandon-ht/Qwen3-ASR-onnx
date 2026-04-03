@@ -52,3 +52,62 @@ python3 infer_qwen3_asr.py \
     --wav ${WAV_PATH} \
     --device cpu \
     --max-new-tokens 100
+
+BATCH_WAVS=(
+  ./test_wavs/dia_minnan.wav
+  ./test_wavs/dia_sh.wav
+  ./test_wavs/dia_yue.wav
+  ./test_wavs/far_2.wav
+  ./test_wavs/far_3.wav
+  ./test_wavs/far_4.wav
+  ./test_wavs/far_5.wav
+  ./test_wavs/ja_en_codeswitch.wav
+  ./test_wavs/ja.wav
+  ./test_wavs/lyrics_2.wav
+  ./test_wavs/lyrics_3.wav
+  ./test_wavs/lyrics_en_1.wav
+  ./test_wavs/lyrics_en_2.wav
+  ./test_wavs/lyrics_en_3.wav
+  ./test_wavs/lyrics.wav
+  ./test_wavs/noise_en.wav
+  ./test_wavs/vietnamese.wav
+)
+for f in "${BATCH_WAVS[@]}"; do
+  if [ ! -f "$f" ]; then
+    echo "Skip batch: missing $f"
+    exit 1
+  fi
+done
+
+echo ""
+echo "Batch FP32 Inference"
+python3 infer_qwen3_asr.py \
+    --conv_frontend ./model/model_$Mode/conv_frontend.onnx \
+    --encoder ./model/model_$Mode/encoder.onnx \
+    --decoder ./model/model_$Mode/decoder.onnx \
+    --model ${MODEL_DIR} \
+    --wav "${BATCH_WAVS[@]}" \
+    --device cuda \
+    --max-new-tokens 100
+
+echo ""
+echo "Batch INT8 Encoder + FP32 Decoder"
+python3 infer_qwen3_asr.py \
+    --conv_frontend ./model/model_$Mode/conv_frontend.onnx \
+    --encoder ./model/model_$Mode/encoder.int8.onnx \
+    --decoder ./model/model_$Mode/decoder.onnx \
+    --model ${MODEL_DIR} \
+    --wav "${BATCH_WAVS[@]}" \
+    --device cuda \
+    --max-new-tokens 100
+
+echo ""
+echo "Batch INT8 Inference"
+python3 infer_qwen3_asr.py \
+    --conv_frontend ./model/model_$Mode/conv_frontend.onnx \
+    --encoder ./model/model_$Mode/encoder.onnx \
+    --decoder ./model/model_$Mode/decoder.int8.onnx \
+    --model ${MODEL_DIR} \
+    --wav "${BATCH_WAVS[@]}" \
+    --device cpu \
+    --max-new-tokens 100
