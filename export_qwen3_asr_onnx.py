@@ -550,11 +550,11 @@ def quantize_decoder_int8(src_dec: str, dst_dec_i8: str):
     quantize_dynamic(
         model_input=src_dec,
         model_output=dst_dec_i8,
-        weight_type=QuantType.QInt8,
+        weight_type=QuantType.QUInt8,
         per_channel=True,
         reduce_range=False,
         extra_options={
-            "WeightSymmetric": True,
+            "WeightSymmetric": False,
             "PerChannel": True,
             "OpTypesToQuantize": ["MatMul", "Gemm", "Linear"],
             "OpTypesToExclude": [],
