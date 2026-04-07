@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import onnxruntime as ort
@@ -172,6 +172,37 @@ def _load_processor(model_dir: str):
     return AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
 
 
+def _normalize_contexts(context_arg: Optional[List[str]], n: int) -> List[str]:
+    if context_arg is None or len(context_arg) == 0:
+        return [""] * n
+    if len(context_arg) == 1 and n > 1:
+        return [context_arg[0] or ""] * n
+    if len(context_arg) != n:
+        raise ValueError(
+            f"expected 1 or {n} --context values, got {len(context_arg)}"
+        )
+    return [c or "" for c in context_arg]
+
+
+def _build_messages(context: str) -> List[Dict[str, Any]]:
+    return [
+        {"role": "system", "content": context or ""},
+        {"role": "user", "content": [{"type": "audio", "audio": ""}]},
+    ]
+
+
+def _build_text_prompt(
+    proc, context: str, force_language: Optional[str]
+) -> str:
+    msgs = _build_messages(context)
+    base = proc.apply_chat_template(
+        msgs, add_generation_prompt=True, tokenize=False
+    )
+    if force_language:
+        base = base + f"language {force_language}<asr_text>"
+    return base
+
+
 def _resolve_audio_token_and_id(tok, proc) -> Tuple[str, int]:
     candidates: List[str] = []
     for holder in (getattr(proc, "tokenizer", None), tok):
@@ -239,6 +270,13 @@ def get_args():
     p.add_argument("--max-new-tokens", type=int, default=64)
     p.add_argument("--chunk-size", type=int, default=100)
     p.add_argument("--debug", action="store_true")
+    p.add_argument(
+        "--context",
+        type=str,
+        nargs="*",
+        default=None,
+        help="context string(s), same semantics as official transcribe(context=...)",
+    )
     return p.parse_args()
 
 
@@ -250,7 +288,7 @@ def main():
 
     tok = _load_tokenizer(args.model)
     proc = _load_processor(args.model)
-    audio_token, audio_token_id = _resolve_audio_token_and_id(tok, proc)
+    _, audio_token_id = _resolve_audio_token_and_id(tok, proc)
 
     enc_fp32_guess = (
         args.encoder.replace(".int8.onnx", ".onnx")
@@ -274,6 +312,54 @@ def main():
 
     wav_paths = list(args.wav)
     wavs = [_load_audio_any(p) for p in wav_paths]
+    n_wav = len(wavs)
+    contexts = _normalize_contexts(args.context, n_wav)
+    text_prompts = [_build_text_prompt(proc, c, None) for c in contexts]
+    if n_wav > 1 and len(set(text_prompts)) > 1:
+        t_all = time.time()
+        total_sec = sum(max(len(w) / 16000.0, 1e-6) for w in wavs)
+        for i in range(n_wav):
+            _infer_one(
+                args,
+                tok,
+                proc,
+                enc,
+                dec,
+                conv_sess,
+                audio_token_id,
+                [wav_paths[i]],
+                [wavs[i]],
+                [contexts[i]],
+            )
+        print(f"RTF: {(time.time() - t_all) / total_sec:.4f}")
+        return
+
+    _infer_one(
+        args,
+        tok,
+        proc,
+        enc,
+        dec,
+        conv_sess,
+        audio_token_id,
+        wav_paths,
+        wavs,
+        contexts,
+    )
+
+
+def _infer_one(
+    args,
+    tok,
+    proc,
+    enc,
+    dec,
+    conv_sess,
+    audio_token_id,
+    wav_paths: List[str],
+    wavs: List[np.ndarray],
+    contexts: List[str],
+) -> None:
     max_samples = max(int(w.shape[0]) for w in wavs)
     if max_samples <= 0:
         raise RuntimeError("empty audio after load")
@@ -283,19 +369,19 @@ def main():
     ]
     total_audio_sec = sum(max(len(w) / 16000.0, 1e-6) for w in wavs)
 
-    audio_inputs = proc.feature_extractor(
-        wavs_pad,
+    texts = [_build_text_prompt(proc, c, None) for c in contexts]
+    combined = proc(
+        text=texts,
+        audio=wavs_pad,
         sampling_rate=16000,
-        padding="max_length",
-        max_length=max_samples,
+        padding=True,
         truncation=True,
-        return_attention_mask=True,
         return_tensors="np",
     )
-    input_features = np.asarray(
-        audio_inputs["input_features"], dtype=np.float32
-    )
-    feat_mask = np.asarray(audio_inputs["attention_mask"], dtype=np.int32)
+    input_features = np.asarray(combined["input_features"], dtype=np.float32)
+    feat_mask = np.asarray(combined["feature_attention_mask"], dtype=np.int32)
+    input_ids = np.asarray(combined["input_ids"], dtype=np.int64)
+    prompt_attn = np.asarray(combined["attention_mask"], dtype=np.int64)
 
     if args.debug:
         print(
@@ -379,16 +465,7 @@ def main():
     if args.debug:
         print("audio_features:", audio_features.shape, audio_features.dtype)
 
-    system_text = "<|im_start|>system\n<|im_end|>\n"
-    user_text = (
-        f"<|im_start|>user\n<|audio_start|>{audio_token * A}<|audio_end|><|im_end|>\n"
-    )
-    assistant_text = "<|im_start|>assistant\n"
-    full_prompt = system_text + user_text + assistant_text
-
-    enc_one = tok.encode(full_prompt, add_special_tokens=False)
-    S0 = len(enc_one)
-    input_ids = np.tile(np.asarray(enc_one, dtype=np.int64), (B, 1))
+    S0 = int(input_ids.shape[1])
 
     slots = (input_ids == audio_token_id).sum(axis=1)
     if not np.all(slots == A):
@@ -433,7 +510,11 @@ def main():
     if "logits" not in dec_out_names:
         raise RuntimeError(f"decoder outputs missing logits")
 
-    def _run_decoder(step_input_ids: np.ndarray, cur_len: int) -> np.ndarray:
+    def _run_decoder(
+        step_input_ids: np.ndarray,
+        cur_len: int,
+        attn_override: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         Sb = int(step_input_ids.shape[0])
         S = int(step_input_ids.shape[1])
         if Sb != B:
@@ -446,10 +527,17 @@ def main():
             )
 
         cache_pos = np.arange(cur_len, cur_len + S, dtype=np.int64)
-        attn1 = np.ones((1, S), dtype=np.int64)
+
+        if attn_override is not None:
+            attn_mask = attn_override.astype(np.int64, copy=False)
+            if attn_mask.shape != (Sb, S):
+                raise RuntimeError(
+                    f"attention_mask shape {attn_mask.shape} != ({Sb}, {S})"
+                )
+        else:
+            attn_mask = np.ones((Sb, S), dtype=np.int64)
 
         def _run_batched() -> np.ndarray:
-            attn_mask = np.ones((B, S), dtype=np.int64)
             feed: Dict[str, np.ndarray] = {
                 "input_ids": step_input_ids,
                 "audio_features": audio_features,
@@ -473,7 +561,7 @@ def main():
             feed: Dict[str, np.ndarray] = {
                 "input_ids": step_input_ids[bi : bi + 1],
                 "audio_features": audio_features[bi : bi + 1],
-                "attention_mask": attn1,
+                "attention_mask": attn_mask[bi : bi + 1],
                 "cache_position": cache_pos,
             }
             for i in range(L):
@@ -499,7 +587,7 @@ def main():
             )
 
     cur_len = 0
-    logits = _run_decoder(input_ids, cur_len)
+    logits = _run_decoder(input_ids, cur_len, prompt_attn)
     cur_len += S0
 
     eos_id = tok.eos_token_id
@@ -525,7 +613,7 @@ def main():
                 step_ids[b, 0] = (
                     int(eos_id) if eos_id is not None else out_rows[b][-1]
                 )
-        logits = _run_decoder(step_ids, cur_len)
+        logits = _run_decoder(step_ids, cur_len, None)
         cur_len += 1
         next_ids = np.argmax(logits[:, -1, :], axis=-1).astype(np.int64)
         for b in range(B):
