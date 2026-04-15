@@ -1,0 +1,390 @@
+{
+  "model_type": "ONNX",
+  "npu_mode": "NPU3",
+  "quant": {
+    "input_configs": [
+      {
+        "tensor_name": "input_ids",
+        "calibration_dataset": "./input_ids.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "audio_features",
+        "calibration_dataset": "./audio_features.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "attention_mask",
+        "calibration_dataset": "./attention_mask.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_position",
+        "calibration_dataset": "./cache_position.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_0",
+        "calibration_dataset": "./cache_key_0.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_1",
+        "calibration_dataset": "./cache_key_1.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_2",
+        "calibration_dataset": "./cache_key_2.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_3",
+        "calibration_dataset": "./cache_key_3.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_4",
+        "calibration_dataset": "./cache_key_4.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_5",
+        "calibration_dataset": "./cache_key_5.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_6",
+        "calibration_dataset": "./cache_key_6.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_7",
+        "calibration_dataset": "./cache_key_7.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_8",
+        "calibration_dataset": "./cache_key_8.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_9",
+        "calibration_dataset": "./cache_key_9.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_10",
+        "calibration_dataset": "./cache_key_10.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_11",
+        "calibration_dataset": "./cache_key_11.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_12",
+        "calibration_dataset": "./cache_key_12.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_13",
+        "calibration_dataset": "./cache_key_13.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_14",
+        "calibration_dataset": "./cache_key_14.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_15",
+        "calibration_dataset": "./cache_key_15.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_16",
+        "calibration_dataset": "./cache_key_16.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_17",
+        "calibration_dataset": "./cache_key_17.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_18",
+        "calibration_dataset": "./cache_key_18.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_19",
+        "calibration_dataset": "./cache_key_19.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_20",
+        "calibration_dataset": "./cache_key_20.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_21",
+        "calibration_dataset": "./cache_key_21.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_22",
+        "calibration_dataset": "./cache_key_22.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_23",
+        "calibration_dataset": "./cache_key_23.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_24",
+        "calibration_dataset": "./cache_key_24.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_25",
+        "calibration_dataset": "./cache_key_25.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_26",
+        "calibration_dataset": "./cache_key_26.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_key_27",
+        "calibration_dataset": "./cache_key_27.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_0",
+        "calibration_dataset": "./cache_value_0.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_1",
+        "calibration_dataset": "./cache_value_1.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_2",
+        "calibration_dataset": "./cache_value_2.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_3",
+        "calibration_dataset": "./cache_value_3.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_4",
+        "calibration_dataset": "./cache_value_4.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_5",
+        "calibration_dataset": "./cache_value_5.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_6",
+        "calibration_dataset": "./cache_value_6.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_7",
+        "calibration_dataset": "./cache_value_7.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_8",
+        "calibration_dataset": "./cache_value_8.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_9",
+        "calibration_dataset": "./cache_value_9.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_10",
+        "calibration_dataset": "./cache_value_10.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_11",
+        "calibration_dataset": "./cache_value_11.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_12",
+        "calibration_dataset": "./cache_value_12.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_13",
+        "calibration_dataset": "./cache_value_13.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_14",
+        "calibration_dataset": "./cache_value_14.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_15",
+        "calibration_dataset": "./cache_value_15.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_16",
+        "calibration_dataset": "./cache_value_16.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_17",
+        "calibration_dataset": "./cache_value_17.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_18",
+        "calibration_dataset": "./cache_value_18.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_19",
+        "calibration_dataset": "./cache_value_19.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_20",
+        "calibration_dataset": "./cache_value_20.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_21",
+        "calibration_dataset": "./cache_value_21.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_22",
+        "calibration_dataset": "./cache_value_22.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_23",
+        "calibration_dataset": "./cache_value_23.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_24",
+        "calibration_dataset": "./cache_value_24.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_25",
+        "calibration_dataset": "./cache_value_25.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_26",
+        "calibration_dataset": "./cache_value_26.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      },
+      {
+        "tensor_name": "cache_value_27",
+        "calibration_dataset": "./cache_value_27.tar.gz",
+        "calibration_size": -1,
+        "calibration_format": "Numpy"
+      }
+    ],
+    "layer_configs": [
+      {
+        "start_tensor_names": [
+          "DEFAULT"
+        ],
+        "end_tensor_names": [
+          "DEFAULT"
+        ],
+        "data_type": "U16"
+      }
+    ],
+    "calibration_method": "MinMax",
+    "precision_analysis": true,
+    "precision_analysis_method": "EndToEnd"
+  },
+  "input_processors": [
+    {
+      "tensor_name": "DEFAULT"
+    }
+  ],
+  "compiler": {
+    "check": 0
+  }
+}
