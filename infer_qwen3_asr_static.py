@@ -11,6 +11,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import onnxruntime as ort
+try:
+    import axengine as axe
+except ImportError:
+    axe = None
 import scipy.io.wavfile
 import scipy.signal
 
@@ -63,6 +67,13 @@ def _make_sess(path: str, device: str = "cpu") -> ort.InferenceSession:
     else:
         providers = ["CPUExecutionProvider"]
     return ort.InferenceSession(path, sess_options=so, providers=providers)
+
+
+def _make_axe_sess(path: str):
+    """Create an axengine InferenceSession for .axmodel files."""
+    if axe is None:
+        raise RuntimeError("axengine not installed; cannot load .axmodel file")
+    return axe.InferenceSession(path)
 
 
 def _make_sess_with_fallback(
@@ -323,14 +334,17 @@ def main():
     proc = _load_processor(args.model)
     _, audio_token_id = _resolve_audio_token_and_id(tok, proc)
 
-    enc_fp32_guess = (
-        args.encoder.replace(".int8.onnx", ".onnx")
-        if args.encoder.endswith(".int8.onnx")
-        else None
-    )
-    enc = _make_sess_with_fallback(
-        args.encoder, device=args.device, fp32_fallback=enc_fp32_guess
-    )
+    if args.encoder.endswith(".axmodel"):
+        enc = _make_axe_sess(args.encoder)
+    else:
+        enc_fp32_guess = (
+            args.encoder.replace(".int8.onnx", ".onnx")
+            if args.encoder.endswith(".int8.onnx")
+            else None
+        )
+        enc = _make_sess_with_fallback(
+            args.encoder, device=args.device, fp32_fallback=enc_fp32_guess
+        )
 
     dec_fp32_guess = (
         args.decoder.replace(".int8.onnx", ".onnx")
@@ -341,7 +355,10 @@ def main():
         args.decoder, device=args.device, fp32_fallback=dec_fp32_guess
     )
 
-    conv_sess = _make_sess(args.conv_frontend, device=args.device)
+    if args.conv_frontend.endswith(".axmodel"):
+        conv_sess = _make_axe_sess(args.conv_frontend)
+    else:
+        conv_sess = _make_sess(args.conv_frontend, device=args.device)
 
     _infer_one(
         args,
@@ -471,9 +488,11 @@ def _infer_one(
             int(tok_mask.sum()),
         )
 
+    # axengine (.axmodel) expects uint8 mask; onnxruntime accepts bool
+    _mask_dtype = np.uint8 if args.encoder.endswith(".axmodel") else np.bool_
     enc_inputs = {
         "input_features": conv_output_np,
-        "feature_attention_mask": tok_mask.astype(np.bool_),
+        "feature_attention_mask": tok_mask.astype(_mask_dtype),
     }
     (audio_features,) = enc.run(["audio_features"], enc_inputs)
     audio_features = np.asarray(audio_features, dtype=np.float32)
