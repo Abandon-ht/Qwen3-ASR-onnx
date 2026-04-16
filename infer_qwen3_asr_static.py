@@ -76,6 +76,23 @@ def _make_axe_sess(path: str):
     return axe.InferenceSession(path)
 
 
+def _sanitize_node_name(name: str) -> str:
+    safe = name.replace("/", "_").replace("\\", "_").replace(":", "_")
+    return safe if safe else "unnamed_output"
+
+
+def _dump_conv_outputs(
+    output_names: List[str],
+    output_values: List[np.ndarray],
+    root_dir: str,
+) -> None:
+    ts = str(int(time.time() * 1000))
+    for name, value in zip(output_names, output_values):
+        node_dir = os.path.join(root_dir, _sanitize_node_name(name))
+        os.makedirs(node_dir, exist_ok=True)
+        np.save(os.path.join(node_dir, f"{ts}.npy"), np.asarray(value))
+
+
 def _make_sess_with_fallback(
     path: str, device: str, fp32_fallback: Optional[str] = None
 ) -> ort.InferenceSession:
@@ -290,6 +307,9 @@ STATIC_CONV_F = 128
 STATIC_AUDIO_TOKENS = 390
 STATIC_DECODER_SEQ = 390
 STATIC_HIDDEN = 1024
+CONV_DUMP_ROOT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "npy_outputs", "conv_frontend"
+)
 
 
 def _pad_or_truncate_last_dim(x: np.ndarray, target_len: int) -> np.ndarray:
@@ -456,7 +476,20 @@ def _infer_one(
         )
 
     conv_inputs = {"input_features": mel_input}
-    (conv_output_np,) = conv_sess.run(["conv_output"], conv_inputs)
+    conv_output_names = [o.name for o in conv_sess.get_outputs()]
+    conv_values = conv_sess.run(conv_output_names, conv_inputs)
+    _dump_conv_outputs(conv_output_names, conv_values, CONV_DUMP_ROOT)
+
+    conv_out_map = {
+        name: np.asarray(val) for name, val in zip(conv_output_names, conv_values)
+    }
+    if "conv_output" in conv_out_map:
+        conv_output_np = conv_out_map["conv_output"]
+    else:
+        conv_output_np = np.asarray(conv_values[0])
+        print(
+            f"[warn] conv_frontend output 'conv_output' not found, fallback to '{conv_output_names[0]}'"
+        )
 
     valid = feat_mask != 0
     feat_len_np = valid.sum(axis=1).astype(np.int64)
