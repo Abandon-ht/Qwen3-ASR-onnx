@@ -308,6 +308,39 @@ def verify_onnx(model_path: str, inputs_np: Dict[str, Any], fetches: List[str]):
     return outs
 
 
+def ensure_static_onnx_graph(model_path: str, model_name: str = "model"):
+    """Verify ONNX model has no dynamic-shape related operations.
+    
+    For encoder, allows Pad/Concat nodes if they're part of static padding.
+    """
+    m = onnx.load(model_path, load_external_data=False)
+    
+    if "encoder" in model_name.lower():
+        bad_ops = {"Shape", "Gather"}
+        allow_pad_concat = True
+    else:
+        bad_ops = {"Shape", "Gather", "Concat", "Pad"}
+        allow_pad_concat = False
+    
+    found = []
+    for n in m.graph.node:
+        if n.op_type in bad_ops:
+            found.append((n.name, n.op_type))
+        elif n.op_type in ("Pad", "Concat") and not allow_pad_concat:
+            found.append((n.name, n.op_type))
+
+    if found:
+        detail = ", ".join([f"{name}:{op}" for name, op in found[:12]])
+        raise RuntimeError(
+            f"{model_name} still has dynamic-shape related ops "
+            f"({len(found)} found): {detail}"
+        )
+
+    in_shape = [d.dim_value for d in m.graph.input[0].type.tensor_type.shape.dim]
+    out_shape = [d.dim_value for d in m.graph.output[0].type.tensor_type.shape.dim]
+    print(f"[check] {model_name} static graph ok input={in_shape} output={out_shape}")
+
+
 def _register_qwen3_asr():
     try:
         from qwen3_asr import (
@@ -376,10 +409,52 @@ def export_conv_frontend(
     if device.type == "cuda":
         conv_frontend = conv_frontend.to(device)
 
+    b, t, fdim = [int(v) for v in dummy_mel.shape]
+    cs = int(conv_frontend.chunk_size)
+    if b <= 0 or t <= 0 or fdim <= 0:
+        raise RuntimeError(f"invalid dummy mel shape: {(b, t, fdim)}")
+    if t % cs != 0:
+        raise RuntimeError(
+            f"static conv export requires T % chunk_size == 0, got T={t}, chunk_size={cs}"
+        )
+
+    class _StaticConvFrontendExport(torch.nn.Module):
+        def __init__(self, base: ConvFrontend, batch: int, frames: int, feat: int):
+            super().__init__()
+            self.convs = base.convs
+            self.conv_out = base.conv_out
+            self.batch = int(batch)
+            self.frames = int(frames)
+            self.feat = int(feat)
+            self.chunk = int(base.chunk_size)
+            self.num_chunks = self.frames // self.chunk
+            self.tokens_per_chunk = int(base.tokens_per_chunk)
+            self.flat_dim = int(base.conv_out.weight.shape[1])
+            self.out_dim = int(base.conv_out.weight.shape[0])
+
+        def forward(self, mel_bt_f: torch.Tensor) -> torch.Tensor:
+            x = mel_bt_f.view(self.batch, self.num_chunks, self.chunk, self.feat)
+            x = x.view(self.batch * self.num_chunks, self.chunk, self.feat)
+            x = x.transpose(1, 2).unsqueeze(1)
+
+            x = torch.nn.functional.gelu(self.convs[0](x))
+            x = torch.nn.functional.gelu(self.convs[1](x))
+            x = torch.nn.functional.gelu(self.convs[2](x))
+
+            x = x.permute(0, 3, 1, 2).contiguous()
+            x = x.view(self.batch * self.num_chunks, self.tokens_per_chunk, self.flat_dim)
+            x = self.conv_out(x)
+            x = x.view(self.batch, self.num_chunks * self.tokens_per_chunk, self.out_dim)
+            return x
+
+    export_frontend = _StaticConvFrontendExport(conv_frontend, b, t, fdim).eval()
+    if device.type == "cuda":
+        export_frontend = export_frontend.to(device)
+
     conv_out = os.path.join(outdir, "conv_frontend.onnx")
     with torch.no_grad():
         torch.onnx.export(
-            conv_frontend,
+            export_frontend,
             (dummy_mel,),
             conv_out,
             input_names=["input_features"],
@@ -391,6 +466,7 @@ def export_conv_frontend(
 
     model = onnx.load(conv_out, load_external_data=False)
     onnx.save(model, conv_out, save_as_external_data=False)
+    ensure_static_onnx_graph(conv_out, "conv_frontend.onnx")
     print("[export] conv_frontend.onnx")
 
     if verify:
@@ -414,6 +490,7 @@ def export_encoder_backend_only(
     thinker, input_features, token_mask, opset, path_raw, chunk_size: int
 ):
     from conv_frontend import ConvFrontend
+    from encoder_static_export import StaticEncoderExport
 
     audio_tower = getattr(thinker, "audio_tower", None)
     if audio_tower is None:
@@ -433,8 +510,27 @@ def export_encoder_backend_only(
     if input_features.dtype != torch.float32:
         input_features = input_features.to(torch.float32)
 
+    b, t, h = [int(v) for v in input_features.shape]
+    if b <= 0 or t <= 0 or h <= 0:
+        raise RuntimeError(f"invalid input shape: {(b, t, h)}")
+
+    export_encoder = StaticEncoderExport(
+        w.backend.layers,
+        w.backend.positional_embedding,
+        w.backend.ln_post,
+        w.backend.proj1,
+        w.backend.proj2,
+        w.audio_proj,
+        b,
+        t,
+        tokens_per_chunk,
+        window_aftercnn,
+    ).eval()
+    if input_features.device.type == "cuda":
+        export_encoder = export_encoder.to(input_features.device)
+
     torch.onnx.export(
-        w,
+        export_encoder,
         (input_features, token_mask),
         path_raw,
         input_names=["input_features", "feature_attention_mask"],
@@ -673,6 +769,7 @@ def main():
         ir=9,
         external_data=(not args.fp32_no_external_data),
     )
+    ensure_static_onnx_graph(enc_out, "encoder.onnx")
     try:
         os.remove(enc_tmp)
     except Exception:
